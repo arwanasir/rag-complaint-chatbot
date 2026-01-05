@@ -49,7 +49,6 @@ def embed_and_index(df):
     print("Generating embeddings... please wait.")
     embeddings = model.encode(df['chunk'].tolist(), show_progress_bar=True)
 
-# 3. Convert embeddings to a format FAISS likes (float32)
     embeddings = np.array(embeddings).astype('float32')
     dimension = embeddings.shape[1]
     index = faiss.IndexFlatL2(dimension)
