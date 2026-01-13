@@ -16,7 +16,6 @@ def load_resources(vector_path, pkl_path):
 def get_llm_pipeline():
     model_id = "google/flan-t5-large"
 
-    # Load with half-precision to prevent the kernel from dying
     model = AutoModelForSeq2SeqLM.from_pretrained(
         model_id,
         torch_dtype=torch.float16,
@@ -30,16 +29,34 @@ def get_llm_pipeline():
 def ask_assistant(query, df_chunks, index, embed_model, generator):
     query_vector = embed_model.encode([query]).astype('float32')
     _, indices = index.search(query_vector, k=5)
-    context = "\n\n".join([df_chunks.iloc[i]['chunk']for i in indices[0]])
-    # prompt = f"Context: {context}\n\nQuestion: {query}\n\nAnswer:"
-    prompt = """You are a financial analyst assistant for CrediTrust. Your task is to answer 
+    context = "\n\n".join([df_chunks.iloc[i]['chunk'] for i in indices[0]])
+
+    prompt = f"""You are a financial analyst assistant for CrediTrust. Your task is to answer 
                 questions about customer complaints. Use the following retrieved complaint 
                 excerpts to formulate your answer. If the context doesn't contain the 
-                answer, state that you don't have enough information. '
+                answer, say "i don't have enough information." 
+    Context: {context}
+    Question: {query}
+    Answer:"""
+
+    result = generator(prompt, max_new_tokens=150)
+    return result[0]['generated_text']
+
+
+"""def ask_assistant(query, df_chunks, index, embed_model, generator):
+    query_vector = embed_model.encode([query]).astype('float32')
+    _, indices = index.search(query_vector, k=5)
+    context = "\n\n".join([df_chunks.iloc[i]['chunk']for i in indices[0]])
+    # prompt = f"Context: {context}\n\nQuestion: {query}\n\nAnswer:"
+    prompt = You are a financial analyst assistant for CrediTrust. Your task is to answer 
+                questions about customer complaints. Use the following retrieved complaint 
+                excerpts to formulate your answer. If the context doesn't contain the 
+                answer, say "i don't have enough information." 
     'Context: {context}
     Question :{query}
-    Answer:"""
+    Answer:
 
     result = generator(prompt, max_new_tokens=150, num_beams=5,
                        repetition_penalty=2.5, no_repeat_ngram_size=3, early_stopping=True)
     return result[0]['generated_text']
+    """
