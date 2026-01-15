@@ -43,3 +43,10 @@ logs/
 *.log
 output/
 results/
+
+notebooks/uuf.ipynb
+notebooks/fina_rag.ipynb
+
+src/uuf.py
+src/fina_rag.py
+app.py
