@@ -28,19 +28,29 @@ def get_llm_pipeline():
 
 def ask_assistant(query, df_chunks, index, embed_model, generator):
     query_vector = embed_model.encode([query]).astype('float32')
-    _, indices = index.search(query_vector, k=5)
-    context = "\n\n".join([df_chunks.iloc[i]['chunk'] for i in indices[0]])
+    distances, sem_indices = index.search(query_vector, k=5)
+    sem_chunks = [df_chunks.iloc[i]['chunk'] for i in sem_indices[0]]
 
-    prompt = f"""You are a financial analyst assistant for CrediTrust. Your task is to answer 
-                questions about customer complaints. Use the following retrieved complaint 
-                excerpts to formulate your answer. If the context doesn't contain the 
-                answer, say "i don't have enough information." 
-    Context: {context}
+    keywords = [word for word in query.split() if len(word) > 3]
+    keyword_chunks = []
+    for word in keywords:
+        matches = df_chunks[df_chunks['chunk'].str.contains(
+            word, case=False, na=False)]
+        keyword_chunks.extend(matches['chunk'].head(2).tolist())
+
+    combined_context = list(dict.fromkeys(sem_chunks + keyword_chunks))[:8]
+    context_text = "\n---\n".join(combined_context)
+
+    prompt = f"""You are a CrediTrust Analyst. Answer ONLY using the Context.
+    
+    Context:
+    {context_text}
+    
     Question: {query}
     Answer:"""
 
-    result = generator(prompt, max_new_tokens=150)
-    return result[0]['generated_text']
+    result = generator(prompt, max_new_tokens=100, temperature=0.1)
+    return result[0]['generated_text'].strip()
 
 
 """def ask_assistant(query, df_chunks, index, embed_model, generator):
