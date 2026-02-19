@@ -1,3 +1,4 @@
+import re
 from sentence_transformers import SentenceTransformer
 import pandas as pd
 import faiss
@@ -18,39 +19,72 @@ def get_llm_pipeline():
 
     model = AutoModelForSeq2SeqLM.from_pretrained(
         model_id,
-        torch_dtype=torch.float16,
         low_cpu_mem_usage=True
     )
     tokenizer = AutoTokenizer.from_pretrained(model_id)
 
-    return pipeline("text2text-generation", model=model, tokenizer=tokenizer)
+    return pipeline(
+        "text2text-generation",
+        model=model,
+        tokenizer=tokenizer
+    )
 
 
-def ask_assistant(query, df_chunks, index, embed_model, generator):
+def ask_assistant(query, df_chunks, index, embed_model, model, tokenizer):
+    # 1. Broaden the Search (Query Expansion)
+    # We combine the semantic search with a keyword fallback to ensure context is found
     query_vector = embed_model.encode([query]).astype('float32')
-    distances, sem_indices = index.search(query_vector, k=5)
-    sem_chunks = [df_chunks.iloc[i]['chunk'] for i in sem_indices[0]]
+    distances, sem_indices = index.search(
+        query_vector, k=8)  # Increased k for more 'material'
 
-    keywords = [word for word in query.split() if len(word) > 3]
-    keyword_chunks = []
+    # Filter valid indices and get chunks
+    retrieved_chunks = [df_chunks.iloc[i]['chunk']
+                        for i in sem_indices[0] if i != -1]
+
+    # 2. Keyword Fallback (Ensures context contains literal matches)
+    keywords = [re.sub(r'\W+', '', word)
+                for word in query.split() if len(word) > 3]
     for word in keywords:
         matches = df_chunks[df_chunks['chunk'].str.contains(
             word, case=False, na=False)]
-        keyword_chunks.extend(matches['chunk'].head(2).tolist())
+        retrieved_chunks.extend(matches['chunk'].head(1).tolist())
 
-    combined_context = list(dict.fromkeys(sem_chunks + keyword_chunks))[:8]
-    context_text = "\n---\n".join(combined_context)
+    # Deduplicate and limit to fit the 512 token window
+    combined_context = list(dict.fromkeys(retrieved_chunks))[:5]
+    context_text = " ".join(combined_context)
 
-    prompt = f"""You are a CrediTrust Analyst. Answer ONLY using the Context.
-    
-    Context:
-    {context_text}
-    
-    Question: {query}
-    Answer:"""
+    # 3. Balanced "Instruction-Tuning" Prompt
+    # We move the 'safety' instruction to the end so it doesn't block the start of the answer.
+    prompt = (
+        f"Context: {context_text}\n\n"
+        f"Question: {query}\n\n"
+        f"Using the context provided above, write a brief, professional response. "
+        f"If the information is absolutely missing, say I do not have enough information.\n"
+        f"Answer:"
+    )
 
-    result = generator(prompt, max_new_tokens=100, temperature=0.1)
-    return result[0]['generated_text'].strip()
+    # 4. Final Generation Parameters (The 'Golden' Config)
+    inputs = tokenizer(prompt, return_tensors="pt",
+                       truncation=True, max_length=512)
+
+    outputs = model.generate(
+        **inputs,
+        max_new_tokens=100,
+        min_new_tokens=10,        # Prevents empty one-word answers
+        repetition_penalty=1.2,   # Lowered to allow the model to use context keywords
+        num_beams=5,              # Higher beam search for better sentence flow
+        length_penalty=0.8,       # Slightly favors concise summaries
+        early_stopping=True,
+        do_sample=False
+    )
+
+    response = tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
+
+    # Clean up any residual 'Answer:' tags
+    if "Answer:" in response:
+        response = response.split("Answer:")[-1].strip()
+
+    return response
 
 
 """def ask_assistant(query, df_chunks, index, embed_model, generator):

@@ -4,6 +4,5 @@ matplotlib
 seaborn
 jupyter
 scikit-learn
-faiss
+faiss-cpu
 sentence_transformers
-langchain_text_splitters
